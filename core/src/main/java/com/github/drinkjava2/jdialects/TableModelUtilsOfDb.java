@@ -65,7 +65,7 @@ public abstract class TableModelUtilsOfDb {// NOSONAR
 
             // Build Columns
             for (TableModel model : tableModels){
-                String tableName = model.getTableName();
+                String tableName = StrUtils.clearQuote(model.getTableName());
                 rs = meta.getColumns(catalog, null, tableName, null); // detail see meta.getC alt + /
                 while (rs.next()){// NOSONAR
                     String colName = rs.getString("COLUMN_NAME");
