@@ -11,17 +11,13 @@
  */
 package com.github.drinkjava2.jdialects;
 
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
-
 import com.github.drinkjava2.jdialects.model.ColumnModel;
 import com.github.drinkjava2.jdialects.model.FKeyModel;
 import com.github.drinkjava2.jdialects.model.TableModel;
+
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The tool to convert database structure(meta data) to TableModels
@@ -39,45 +35,55 @@ public abstract class TableModelUtilsOfDb {// NOSONAR
      * will improve later.
      */
     public static TableModel[] db2Models(Connection con, Dialect dialect) {// NOSONAR
-        List<TableModel> tableModels = new ArrayList<TableModel>();
+
+        try{
+            DatabaseMetaData meta = con.getMetaData();
+            return db2Models(con, dialect, meta.getUserName());
+        }catch (SQLException e){
+            throw new DialectException(e);
+        }
+    }
+
+    public static TableModel[] db2Models(Connection con, Dialect dialect, String schemaName) {// NOSONAR
+        List<TableModel> tableModels = new ArrayList<>();
         SQLException sqlException = null;
         ResultSet rs = null;
         PreparedStatement pst = null;
 
-        try{
+        try {
             DatabaseMetaData meta = con.getMetaData();
             String catalog = con.getCatalog();
             // get Tables
-            rs = meta.getTables(catalog, dialect.isOracleFamily() ? meta.getUserName() : null, null, new String[]{"TABLE"});
-            while (rs.next()){
+            rs = meta.getTables(catalog, dialect.isOracleFamily() ? schemaName : null, null, new String[]{"TABLE"});
+            while (rs.next()) {
                 String tableName = rs.getString(TABLE_NAME);
-                if(!StrUtils.isEmpty(tableName)){
-                    if(ReservedDBWords.isReservedWord(dialect, tableName))
+                if (!StrUtils.isEmpty(tableName)) {
+                    if (ReservedDBWords.isReservedWord(dialect, tableName))
                         tableName = dialect.ddlFeatures.openQuote + tableName + dialect.ddlFeatures.openQuote;
                     TableModel model = new TableModel(tableName);
                     tableModels.add(model);
                     String comment = rs.getString("REMARKS");
-                    if(!StrUtils.isEmpty(comment))
+                    if (!StrUtils.isEmpty(comment))
                         model.setComment(comment);
                 }
             }
             rs.close();
 
             // Build Columns
-            for (TableModel model : tableModels){
+            for (TableModel model : tableModels) {
                 String tableName = StrUtils.clearQuote(model.getTableName());
                 rs = meta.getColumns(catalog, null, tableName, null); // detail see meta.getC alt + /
-                while (rs.next()){// NOSONAR
+                while (rs.next()) {// NOSONAR
                     String colName = rs.getString("COLUMN_NAME");
-                    if(ReservedDBWords.isReservedWord(dialect, colName))
+                    if (ReservedDBWords.isReservedWord(dialect, colName))
                         colName = dialect.ddlFeatures.openQuote + colName + dialect.ddlFeatures.openQuote;
                     ColumnModel col = new ColumnModel(colName);
                     model.addColumn(col);
 
                     int javaSqlType = rs.getInt("DATA_TYPE");
-                    try{
+                    try {
                         col.setColumnType(TypeUtils.javaSqlTypeToDialectType(javaSqlType));
-                    }catch (Exception e1){
+                    } catch (Exception e1) {
                         throw new DialectException("jDialect does not supported java.sql.types value " + javaSqlType, e1);
                     }
 
@@ -88,33 +94,33 @@ public abstract class TableModelUtilsOfDb {// NOSONAR
                     col.setDefaultValue(rs.getString("COLUMN_DEF"));
                     col.setComment(rs.getString("REMARKS"));
 
-                    try{
-                        if(((Boolean) (true)).equals(rs.getBoolean("IS_AUTOINCREMENT")))
+                    try {
+                        if (((Boolean) (true)).equals(rs.getBoolean("IS_AUTOINCREMENT")))
                             col.identityId();
-                    }catch (Exception e){
+                    } catch (Exception e) {
                     }
 
-                    try{
-                        if("YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")))
+                    try {
+                        if ("YES".equalsIgnoreCase(rs.getString("IS_AUTOINCREMENT")))
                             col.identityId();
-                    }catch (Exception e){
+                    } catch (Exception e) {
                     }
                 }
                 rs.close();
             }
 
             // Get Primary Keys for each model
-            for (TableModel model : tableModels){
+            for (TableModel model : tableModels) {
                 rs = meta.getPrimaryKeys(catalog, null, model.getTableName());
-                while (rs.next()){
+                while (rs.next()) {
                     model.getColumnByColName(rs.getString("COLUMN_NAME")).setPkey(true);
                 }
                 rs.close();
             }
             // Get Foreign Keys for each model
-            for (TableModel model : tableModels){
+            for (TableModel model : tableModels) {
                 ResultSet foreignKeyResultSet = meta.getImportedKeys(catalog, null, model.getTableName());
-                while (foreignKeyResultSet.next()){
+                while (foreignKeyResultSet.next()) {
                     String fkname = foreignKeyResultSet.getString("FK_NAME");
                     int keyseq = foreignKeyResultSet.getInt("KEY_SEQ");
                     String fkColumnName = foreignKeyResultSet.getString("FKCOLUMN_NAME");
@@ -122,9 +128,9 @@ public abstract class TableModelUtilsOfDb {// NOSONAR
                     String pkColumnName = foreignKeyResultSet.getString("PKCOLUMN_NAME");
                     FKeyModel fkeyModel = model.getFkey(fkname);
 
-                    if(keyseq == 1){
+                    if (keyseq == 1) {
                         model.fkey(fkname).columns(fkColumnName).refs(pkTablenName, pkColumnName);
-                    }else{
+                    } else {
                         fkeyModel.getColumnNames().add(fkColumnName);
                         String[] newRefs = ArrayUtils.appendStrArray(fkeyModel.getRefTableAndColumns(), pkColumnName);
                         fkeyModel.setRefTableAndColumns(newRefs);
@@ -132,30 +138,30 @@ public abstract class TableModelUtilsOfDb {// NOSONAR
                 }
             }
 
-        }catch (SQLException e){
+        } catch (SQLException e) {
             e.printStackTrace();
             sqlException = e;
-        }finally{
-            if(pst != null)
-                try{
+        } finally {
+            if (pst != null)
+                try {
                     pst.close();
-                }catch (SQLException e1){
-                    if(sqlException != null)
+                } catch (SQLException e1) {
+                    if (sqlException != null)
                         sqlException.setNextException(e1);
                     else
                         sqlException = e1;
                 }
-            try{
-                if(rs != null)
+            try {
+                if (rs != null)
                     rs.close();
-            }catch (SQLException e2){
-                if(sqlException != null)
+            } catch (SQLException e2) {
+                if (sqlException != null)
                     sqlException.setNextException(e2);
                 else
                     sqlException = e2;
             }
         }
-        if(sqlException != null)
+        if (sqlException != null)
             throw new DialectException(sqlException);
         return tableModels.toArray(new TableModel[tableModels.size()]);
     }
